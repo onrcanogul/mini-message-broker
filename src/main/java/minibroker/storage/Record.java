@@ -1,4 +1,4 @@
-package minibroker;
+package minibroker.storage;
 
 /**
  * Raw record sent by the producer. NO offset here — the offset is assigned by Log (during append).

@@ -1,4 +1,4 @@
-package minibroker;
+package minibroker.broker;
 
 import java.nio.file.Path;
 

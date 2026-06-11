@@ -7,34 +7,42 @@ crash recovery (corrupt-tail truncation + log rediscovery on restart).
 
 ## Layout
 
+Packages are split by responsibility; dependencies flow one way:
+`storage` → `protocol` → `broker` / `client` → `Main`.
+
 ```
-src/main/java/minibroker/   # Record, StoredRecord, Log, Protocol, LogManager,
-                            # RequestHandler, BrokerServer, BrokerClient, Main, ...
-src/test/java/minibroker/   # LogTest, LogRecoveryTest, ProtocolTest,
-                            # BrokerServerTest, AcceptanceTest
-lib/                        # junit-platform-console-standalone.jar
+src/main/java/minibroker/
+├── Main.java                 # entry point: wires everything up
+├── storage/                  # Record, StoredRecord, Log   (append-only file, recovery)
+├── protocol/                 # Protocol, ApiKey, ErrorCode, {Produce,Fetch}{Request,Response}
+├── broker/                   # Config, LogManager, RequestHandler, BrokerServer
+└── client/                   # BrokerClient (thin wire client)
+src/test/java/minibroker/     # tests mirror the package they cover; AcceptanceTest at root
+lib/                          # junit-platform-console-standalone.jar (downloaded, git-ignored)
+scripts/                      # setup.sh, build.sh, test.sh, run.sh
 ```
 
-## Build
+## Quick start
+
+```bash
+scripts/setup.sh    # one-time: download the JUnit jar into lib/
+scripts/build.sh    # compile main + tests into out/
+scripts/test.sh     # build + run the full JUnit suite
+scripts/run.sh      # build + start the broker (optional: scripts/run.sh /tmp/mb)
+```
+
+The broker listens on port 9092 and stores logs under `./data` (or the dir you pass).
+
+<details>
+<summary>Raw commands (no scripts)</summary>
 
 ```bash
 JAR=lib/junit-platform-console-standalone.jar
-javac -d out $(find src -name '*.java') -cp "$JAR"
+javac -d out -cp "$JAR" $(find src -name '*.java')           # build
+java -jar "$JAR" execute -cp out --scan-classpath            # test
+java -cp out minibroker.Main /tmp/mb                         # run
 ```
-
-## Test
-
-```bash
-java -jar lib/junit-platform-console-standalone.jar execute -cp out --scan-classpath
-```
-
-## Run the broker
-
-```bash
-# Listens on port 9092; stores logs under ./data (or the dir you pass)
-java -cp out minibroker.Main           # data dir = ./data
-java -cp out minibroker.Main /tmp/mb   # custom data dir
-```
+</details>
 
 ## Try it from code
 

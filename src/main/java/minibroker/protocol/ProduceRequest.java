@@ -1,4 +1,6 @@
-package minibroker;
+package minibroker.protocol;
+
+import minibroker.storage.Record;
 
 import java.util.List;
 

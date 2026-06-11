@@ -1,4 +1,4 @@
-package minibroker;
+package minibroker.protocol;
 
 /** Result status carried in every response body (int16). */
 public enum ErrorCode {

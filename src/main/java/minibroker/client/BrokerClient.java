@@ -1,4 +1,13 @@
-package minibroker;
+package minibroker.client;
+
+import minibroker.protocol.ErrorCode;
+import minibroker.protocol.FetchRequest;
+import minibroker.protocol.FetchResponse;
+import minibroker.protocol.ProduceRequest;
+import minibroker.protocol.ProduceResponse;
+import minibroker.protocol.Protocol;
+import minibroker.storage.Record;
+import minibroker.storage.StoredRecord;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;

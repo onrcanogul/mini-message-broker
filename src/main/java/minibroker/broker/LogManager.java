@@ -1,4 +1,6 @@
-package minibroker;
+package minibroker.broker;
+
+import minibroker.storage.Log;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;

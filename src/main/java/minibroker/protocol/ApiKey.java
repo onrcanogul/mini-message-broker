@@ -1,4 +1,4 @@
-package minibroker;
+package minibroker.protocol;
 
 /** Identifies the request type. Travels in the request header (int16). */
 public enum ApiKey {

@@ -1,4 +1,4 @@
-package minibroker;
+package minibroker.storage;
 
 /**
  * A record AFTER it has been written to the Log: it now has an offset.

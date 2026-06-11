@@ -1,4 +1,7 @@
-package minibroker;
+package minibroker.protocol;
+
+import minibroker.storage.Record;
+import minibroker.storage.StoredRecord;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;

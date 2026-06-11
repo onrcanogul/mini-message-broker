@@ -1,5 +1,7 @@
-package minibroker;
+package minibroker.protocol;
 
+import minibroker.storage.Record;
+import minibroker.storage.StoredRecord;
 import org.junit.jupiter.api.Test;
 
 import java.io.DataInputStream;

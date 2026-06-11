@@ -1,4 +1,8 @@
-package minibroker;
+package minibroker.broker;
+
+import minibroker.protocol.FetchResponse;
+import minibroker.protocol.ProduceResponse;
+import minibroker.protocol.Protocol;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;

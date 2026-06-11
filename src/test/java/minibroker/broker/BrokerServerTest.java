@@ -1,5 +1,13 @@
-package minibroker;
+package minibroker.broker;
 
+import minibroker.protocol.ErrorCode;
+import minibroker.protocol.FetchRequest;
+import minibroker.protocol.FetchResponse;
+import minibroker.protocol.ProduceRequest;
+import minibroker.protocol.ProduceResponse;
+import minibroker.protocol.Protocol;
+import minibroker.storage.Record;
+import minibroker.storage.StoredRecord;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
