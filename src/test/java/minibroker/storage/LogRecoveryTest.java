@@ -49,8 +49,11 @@ class LogRecoveryTest {
         Path file = dir.resolve("partition.log");
         writeThreeRecords(file);
 
+        // The actual data now lives in the base-offset-named segment file, not partition.log.
+        Path segment = dir.resolve(LogSegment.fileName(0));
+
         // Simulate a half-written 4th record: append garbage bytes at EOF.
-        try (FileChannel ch = FileChannel.open(file, StandardOpenOption.WRITE)) {
+        try (FileChannel ch = FileChannel.open(segment, StandardOpenOption.WRITE)) {
             ch.write(ByteBuffer.wrap(new byte[]{0, 0, 0, 50, 1, 2, 3}), ch.size());
         }
 

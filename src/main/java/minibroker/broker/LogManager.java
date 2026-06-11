@@ -40,18 +40,25 @@ public class LogManager {
         if (!Files.isDirectory(dataDir)) return; // fresh broker, nothing to load
         try (var dirs = Files.list(dataDir)) {
             dirs.filter(Files::isDirectory).forEach(dir -> {
-                Path logFile = dir.resolve("partition.log");
-                if (Files.exists(logFile)) {
-                    try {
+                try {
+                    // A partition dir is one that holds at least one segment (.log) file.
+                    if (hasSegment(dir)) {
                         // Directory name IS the map key (topic + "-" + partition).
-                        logs.put(dir.getFileName().toString(), new Log(logFile));
-                    } catch (IOException e) {
-                        throw new UncheckedIOException(e);
+                        // Log only needs the directory; the path's parent identifies it.
+                        logs.put(dir.getFileName().toString(), new Log(dir.resolve("partition.log")));
                     }
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
                 }
             });
         } catch (IOException e) {
             throw new UncheckedIOException(e);
+        }
+    }
+
+    private static boolean hasSegment(Path dir) throws IOException {
+        try (var entries = Files.list(dir)) {
+            return entries.anyMatch(p -> p.getFileName().toString().endsWith(".log"));
         }
     }
 
