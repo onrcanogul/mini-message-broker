@@ -1,0 +1,28 @@
+# Derleme / build çıktıları
+target/
+build/
+out/
+bin/
+*.class
+*.jar
+*.war
+
+# Maven / Gradle
+.gradle/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Loglar ve broker veri dosyaları
+*.log
+/data/
+minibroker-data/
