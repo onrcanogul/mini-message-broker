@@ -15,7 +15,7 @@ public final class Main {
         // Usage: java minibroker.Main [dataDir]   (port is fixed at 9092 in v0)
         Path dataDir = Path.of(args.length > 0 ? args[0] : "data");
         Config config = new Config(9092, dataDir);
-        LogManager logManager = new LogManager(config.dataDir());
+        LogManager logManager = new LogManager(config.dataDir(), config.segmentBytes());
         RequestHandler handler = new RequestHandler(logManager);
 
         BrokerServer server = new BrokerServer(config, handler);

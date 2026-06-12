@@ -21,12 +21,19 @@ public class LogManager {
     public static final int ONLY_PARTITION = 0;
 
     private final Path dataDir;
+    private final long segmentBytes;
     // Keyed by "topic-partition". computeIfAbsent makes creation atomic so two
     // connection threads can never open the same file as two Log objects.
     private final Map<String, Log> logs = new ConcurrentHashMap<>();
 
+    /** Logs never roll (single segment). Keeps the old one-arg contract. */
     public LogManager(Path dataDir) {
+        this(dataDir, Long.MAX_VALUE);
+    }
+
+    public LogManager(Path dataDir, long segmentBytes) {
         this.dataDir = dataDir;
+        this.segmentBytes = segmentBytes;
         discoverExistingLogs();
     }
 
@@ -45,7 +52,7 @@ public class LogManager {
                     if (hasSegment(dir)) {
                         // Directory name IS the map key (topic + "-" + partition).
                         // Log only needs the directory; the path's parent identifies it.
-                        logs.put(dir.getFileName().toString(), new Log(dir.resolve("partition.log")));
+                        logs.put(dir.getFileName().toString(), new Log(dir.resolve("partition.log"), segmentBytes));
                     }
                 } catch (IOException e) {
                     throw new UncheckedIOException(e);
@@ -73,7 +80,7 @@ public class LogManager {
             try {
                 Path dir = dataDir.resolve(key);
                 Files.createDirectories(dir);
-                return new Log(dir.resolve("partition.log"));
+                return new Log(dir.resolve("partition.log"), segmentBytes);
             } catch (IOException e) {
                 // computeIfAbsent can't propagate a checked exception; wrap it.
                 throw new UncheckedIOException(e);
