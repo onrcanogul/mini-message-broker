@@ -19,26 +19,32 @@ import java.util.List;
 public class Log implements AutoCloseable {
 
     private final Path dir;
-    private final long segmentBytes;                         // roll threshold
+    private final long segmentBytes;                            // roll threshold
+    private final int indexInterval;                            // sparse-index spacing
     private final List<LogSegment> segments = new ArrayList<>(); // sorted by baseOffset asc
-    private LogSegment active;                                // == last segment
+    private LogSegment active;                                  // == last segment
 
-    /** Single-segment Log (never rolls). Keeps the old one-arg contract. */
+    /** Single-segment Log (never rolls), default index interval. */
     public Log(Path partitionFile) throws IOException {
-        this(partitionFile, Long.MAX_VALUE);
+        this(partitionFile, Long.MAX_VALUE, LogSegment.DEFAULT_INDEX_INTERVAL);
     }
 
     public Log(Path partitionFile, long segmentBytes) throws IOException {
+        this(partitionFile, segmentBytes, LogSegment.DEFAULT_INDEX_INTERVAL);
+    }
+
+    public Log(Path partitionFile, long segmentBytes, int indexInterval) throws IOException {
         this.dir = partitionFile.toAbsolutePath().getParent();
         this.segmentBytes = segmentBytes;
+        this.indexInterval = indexInterval;
         load();
     }
 
     /**
-     * Startup recovery: discover every .log file, load them in base-offset order.
-     * Each LogSegment recovers itself, but in practice only the ACTIVE (last)
-     * segment can have a partial tail from a crash — older segments were sealed
-     * before rolling and are treated as complete.
+     * Startup recovery: discover every .log file in base-offset order. Older segments
+     * open in CLOSED mode (trust their index, no log scan — cheap); only the ACTIVE
+     * (last) segment scans its .log to recover a possible partial tail. A closed
+     * segment's endOffset is simply the next segment's base offset.
      */
     private void load() throws IOException {
         List<Long> bases = new ArrayList<>();
@@ -52,14 +58,20 @@ public class Log implements AutoCloseable {
         bases.sort(Long::compareTo);
 
         if (bases.isEmpty()) {
-            active = new LogSegment(dir, 0L); // fresh partition
+            active = new LogSegment(dir, 0L, indexInterval); // fresh partition
             segments.add(active);
             return;
         }
-        for (long base : bases) {
-            segments.add(new LogSegment(dir, base));
+        for (int i = 0; i < bases.size(); i++) {
+            long base = bases.get(i);
+            if (i < bases.size() - 1) {
+                long endOffset = bases.get(i + 1); // sealed segment ends where the next begins
+                segments.add(LogSegment.openClosed(dir, base, endOffset, indexInterval));
+            } else {
+                active = new LogSegment(dir, base, indexInterval); // active: scan + rebuild index
+                segments.add(active);
+            }
         }
-        active = segments.get(segments.size() - 1);
     }
 
     /** Appends to the active segment, rolling to a new one if it grew past segmentBytes. */
@@ -73,15 +85,14 @@ public class Log implements AutoCloseable {
 
     private void roll() throws IOException {
         // New segment starts exactly where the active one ended -> contiguous offsets.
-        LogSegment next = new LogSegment(dir, active.endOffset());
+        LogSegment next = new LogSegment(dir, active.endOffset(), indexInterval);
         segments.add(next);
         active = next; // the old active stays open (immutable) for reads
     }
 
     /**
      * Reads from fetchOffset, crossing segment boundaries as needed until ~maxBytes
-     * is reached or there are no more records. A single call can return records from
-     * several segments.
+     * is reached or there are no more records.
      */
     public synchronized List<StoredRecord> read(long fetchOffset, int maxBytes) throws IOException {
         List<StoredRecord> out = new ArrayList<>();
@@ -98,8 +109,7 @@ public class Log implements AutoCloseable {
             for (StoredRecord r : part) remaining -= diskSize(r);
 
             long lastOffset = part.get(part.size() - 1).offset();
-            // If we stopped before this segment's end, maxBytes cut us off -> done.
-            if (lastOffset + 1 < seg.endOffset()) break;
+            if (lastOffset + 1 < seg.endOffset()) break; // maxBytes cut us off mid-segment
             if (remaining <= 0) break;
             start = seg.endOffset(); // continue at the next segment's base offset
         }

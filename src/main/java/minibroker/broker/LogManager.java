@@ -22,18 +22,24 @@ public class LogManager {
 
     private final Path dataDir;
     private final long segmentBytes;
+    private final int indexInterval;
     // Keyed by "topic-partition". computeIfAbsent makes creation atomic so two
     // connection threads can never open the same file as two Log objects.
     private final Map<String, Log> logs = new ConcurrentHashMap<>();
 
     /** Logs never roll (single segment). Keeps the old one-arg contract. */
     public LogManager(Path dataDir) {
-        this(dataDir, Long.MAX_VALUE);
+        this(dataDir, Long.MAX_VALUE, Config.DEFAULT_INDEX_INTERVAL_BYTES);
     }
 
     public LogManager(Path dataDir, long segmentBytes) {
+        this(dataDir, segmentBytes, Config.DEFAULT_INDEX_INTERVAL_BYTES);
+    }
+
+    public LogManager(Path dataDir, long segmentBytes, int indexInterval) {
         this.dataDir = dataDir;
         this.segmentBytes = segmentBytes;
+        this.indexInterval = indexInterval;
         discoverExistingLogs();
     }
 
@@ -52,7 +58,7 @@ public class LogManager {
                     if (hasSegment(dir)) {
                         // Directory name IS the map key (topic + "-" + partition).
                         // Log only needs the directory; the path's parent identifies it.
-                        logs.put(dir.getFileName().toString(), new Log(dir.resolve("partition.log"), segmentBytes));
+                        logs.put(dir.getFileName().toString(), new Log(dir.resolve("partition.log"), segmentBytes, indexInterval));
                     }
                 } catch (IOException e) {
                     throw new UncheckedIOException(e);
@@ -80,7 +86,7 @@ public class LogManager {
             try {
                 Path dir = dataDir.resolve(key);
                 Files.createDirectories(dir);
-                return new Log(dir.resolve("partition.log"), segmentBytes);
+                return new Log(dir.resolve("partition.log"), segmentBytes, indexInterval);
             } catch (IOException e) {
                 // computeIfAbsent can't propagate a checked exception; wrap it.
                 throw new UncheckedIOException(e);
