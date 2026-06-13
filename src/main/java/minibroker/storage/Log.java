@@ -5,46 +5,64 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Supplier;
 
 /**
  * A partition's log: an ordered sequence of LogSegments (by base offset), exactly
  * one of which is "active" (the last). Offsets increase monotonically ACROSS
  * segments — a segment boundary never resets them.
  *
- * Public API (append / read / endOffset) is unchanged from v0.
+ * Public API (append / read / endOffset) is unchanged from v0; retention adds
+ * enforceRetention() and logStartOffset().
  *
  * The constructor takes a path for backward compatibility; only its PARENT
  * directory matters — that's the partition directory the segment files live in.
  */
 public class Log implements AutoCloseable {
 
+    public static final long RETENTION_OFF = -1;
+
     private final Path dir;
     private final long segmentBytes;                            // roll threshold
     private final int indexInterval;                            // sparse-index spacing
+    private final long retentionMs;                             // -1 = off
+    private final long retentionBytes;                          // -1 = off
+    private final Supplier<Long> clock;                         // injectable 'now' for tests
     private final List<LogSegment> segments = new ArrayList<>(); // sorted by baseOffset asc
     private LogSegment active;                                  // == last segment
 
-    /** Single-segment Log (never rolls), default index interval. */
+    /** Single-segment Log (never rolls), default index interval, retention off. */
     public Log(Path partitionFile) throws IOException {
-        this(partitionFile, Long.MAX_VALUE, LogSegment.DEFAULT_INDEX_INTERVAL);
+        this(partitionFile, Long.MAX_VALUE, LogSegment.DEFAULT_INDEX_INTERVAL,
+                RETENTION_OFF, RETENTION_OFF, System::currentTimeMillis);
     }
 
     public Log(Path partitionFile, long segmentBytes) throws IOException {
-        this(partitionFile, segmentBytes, LogSegment.DEFAULT_INDEX_INTERVAL);
+        this(partitionFile, segmentBytes, LogSegment.DEFAULT_INDEX_INTERVAL,
+                RETENTION_OFF, RETENTION_OFF, System::currentTimeMillis);
     }
 
     public Log(Path partitionFile, long segmentBytes, int indexInterval) throws IOException {
+        this(partitionFile, segmentBytes, indexInterval,
+                RETENTION_OFF, RETENTION_OFF, System::currentTimeMillis);
+    }
+
+    public Log(Path partitionFile, long segmentBytes, int indexInterval,
+               long retentionMs, long retentionBytes, Supplier<Long> clock) throws IOException {
         this.dir = partitionFile.toAbsolutePath().getParent();
         this.segmentBytes = segmentBytes;
         this.indexInterval = indexInterval;
+        this.retentionMs = retentionMs;
+        this.retentionBytes = retentionBytes;
+        this.clock = clock;
         load();
     }
 
     /**
      * Startup recovery: discover every .log file in base-offset order. Older segments
-     * open in CLOSED mode (trust their index, no log scan — cheap); only the ACTIVE
-     * (last) segment scans its .log to recover a possible partial tail. A closed
-     * segment's endOffset is simply the next segment's base offset.
+     * open in CLOSED mode (trust their index, no log scan); only the ACTIVE (last)
+     * segment scans its .log to recover a possible partial tail. A closed segment's
+     * endOffset is simply the next segment's base offset.
      */
     private void load() throws IOException {
         List<Long> bases = new ArrayList<>();
@@ -58,7 +76,7 @@ public class Log implements AutoCloseable {
         bases.sort(Long::compareTo);
 
         if (bases.isEmpty()) {
-            active = new LogSegment(dir, 0L, indexInterval); // fresh partition
+            active = new LogSegment(dir, 0L, indexInterval);
             segments.add(active);
             return;
         }
@@ -68,7 +86,7 @@ public class Log implements AutoCloseable {
                 long endOffset = bases.get(i + 1); // sealed segment ends where the next begins
                 segments.add(LogSegment.openClosed(dir, base, endOffset, indexInterval));
             } else {
-                active = new LogSegment(dir, base, indexInterval); // active: scan + rebuild index
+                active = new LogSegment(dir, base, indexInterval);
                 segments.add(active);
             }
         }
@@ -84,10 +102,48 @@ public class Log implements AutoCloseable {
     }
 
     private void roll() throws IOException {
-        // New segment starts exactly where the active one ended -> contiguous offsets.
         LogSegment next = new LogSegment(dir, active.endOffset(), indexInterval);
         segments.add(next);
         active = next; // the old active stays open (immutable) for reads
+    }
+
+    /**
+     * Deletes retention-eligible CLOSED segments (whole files, .log + .index). The
+     * active segment is never deleted. Time and size policies both apply; a segment
+     * is removed if either triggers. Deletion advances logStartOffset().
+     */
+    public synchronized void enforceRetention() throws IOException {
+        // Time-based: drop oldest closed segments whose newest record fell out of the window.
+        if (retentionMs > 0) {
+            long cutoff = clock.get() - retentionMs;
+            while (segments.size() > 1 && segments.get(0) != active
+                    && segments.get(0).lastTimestamp() < cutoff) {
+                removeOldest();
+            }
+        }
+        // Size-based: drop oldest closed segments until total size is under the cap.
+        if (retentionBytes > 0) {
+            long total = totalSizeBytes();
+            while (total > retentionBytes && segments.size() > 1 && segments.get(0) != active) {
+                total -= segments.get(0).sizeInBytes();
+                removeOldest();
+            }
+        }
+    }
+
+    private void removeOldest() throws IOException {
+        segments.remove(0).delete();
+    }
+
+    private long totalSizeBytes() {
+        long total = 0;
+        for (LogSegment s : segments) total += s.sizeInBytes();
+        return total;
+    }
+
+    /** Smallest readable offset = base offset of the oldest remaining segment. */
+    public synchronized long logStartOffset() {
+        return segments.get(0).baseOffset();
     }
 
     /**
@@ -111,14 +167,14 @@ public class Log implements AutoCloseable {
             long lastOffset = part.get(part.size() - 1).offset();
             if (lastOffset + 1 < seg.endOffset()) break; // maxBytes cut us off mid-segment
             if (remaining <= 0) break;
-            start = seg.endOffset(); // continue at the next segment's base offset
+            start = seg.endOffset();
         }
         return out;
     }
 
     /** Index of the segment owning fetchOffset: the largest baseOffset <= fetchOffset. */
     private int segmentIndexFor(long fetchOffset) {
-        if (fetchOffset < 0 || fetchOffset >= active.endOffset()) return -1;
+        if (fetchOffset < logStartOffset() || fetchOffset >= active.endOffset()) return -1;
         int found = -1;
         for (int i = 0; i < segments.size(); i++) {
             if (segments.get(i).baseOffset() <= fetchOffset) found = i;

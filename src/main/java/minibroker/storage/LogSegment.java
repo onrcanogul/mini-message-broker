@@ -3,6 +3,7 @@ package minibroker.storage;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
@@ -43,8 +44,11 @@ public class LogSegment implements AutoCloseable {
 
     private final long baseOffset;
     private final int indexInterval;
+    private final Path logFile;
+    private final Path indexFile;
     private final FileChannel logChannel;
     private final FileChannel indexChannel;
+    private long lastTimestamp = Long.MIN_VALUE; // newest record's timestamp (for time retention)
 
     // In-memory mirror of the sparse index, ascending by relativeOffset.
     private final List<int[]> index = new ArrayList<>(); // each: {relativeOffset, position}
@@ -78,9 +82,11 @@ public class LogSegment implements AutoCloseable {
         this.baseOffset = baseOffset;
         this.indexInterval = indexInterval;
         this.nextOffset = baseOffset;
-        this.logChannel = FileChannel.open(dir.resolve(fileName(baseOffset)),
+        this.logFile = dir.resolve(fileName(baseOffset));
+        this.indexFile = dir.resolve(indexFileName(baseOffset));
+        this.logChannel = FileChannel.open(logFile,
                 StandardOpenOption.CREATE, StandardOpenOption.READ, StandardOpenOption.WRITE);
-        this.indexChannel = FileChannel.open(dir.resolve(indexFileName(baseOffset)),
+        this.indexChannel = FileChannel.open(indexFile,
                 StandardOpenOption.CREATE, StandardOpenOption.READ, StandardOpenOption.WRITE);
 
         if (mode == Mode.ACTIVE) {
@@ -89,7 +95,14 @@ public class LogSegment implements AutoCloseable {
             loadIndex();                              // trust the persisted index
             this.nextOffset = knownEndOffset;
             this.writePosition = logChannel.size();
+            // newest timestamp via the last record only (bounded read, no full scan)
+            this.lastTimestamp = (nextOffset > baseOffset) ? readLastTimestamp() : Long.MIN_VALUE;
         }
+    }
+
+    private long readLastTimestamp() throws IOException {
+        List<StoredRecord> last = read(nextOffset - 1, 1);
+        return last.isEmpty() ? Long.MIN_VALUE : last.get(0).timestamp();
     }
 
     // ===================== recovery =====================
@@ -133,6 +146,7 @@ public class LogSegment implements AutoCloseable {
             if ((int) crc.getValue() != rec.getInt(bodyLen)) break; // corrupt -> tail
 
             long offset = rec.getLong(0); // first body field
+            lastTimestamp = rec.getLong(8); // second body field (timestamp)
             int totalLen = 4 + recLen;
             sinceLast += totalLen;
             if (sinceLast >= indexInterval) {
@@ -189,6 +203,7 @@ public class LogSegment implements AutoCloseable {
 
         writePosition += buf.limit();
         nextOffset++;
+        lastTimestamp = record.timestamp();
 
         // Sparse index: one entry per ~indexInterval bytes.
         bytesSinceLastIndexEntry += buf.limit();
@@ -290,6 +305,18 @@ public class LogSegment implements AutoCloseable {
     /** Number of sparse index entries (for tests/observability). */
     public synchronized int indexEntryCount() {
         return index.size();
+    }
+
+    /** Timestamp of this segment's newest record (Long.MIN_VALUE if empty). */
+    public synchronized long lastTimestamp() {
+        return lastTimestamp;
+    }
+
+    /** Closes channels and removes both the .log and .index files from disk. */
+    public synchronized void delete() throws IOException {
+        close();
+        Files.deleteIfExists(logFile);
+        Files.deleteIfExists(indexFile);
     }
 
     @Override

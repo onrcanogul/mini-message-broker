@@ -59,7 +59,8 @@ public class RequestHandler {
 
         long leo = log.endOffset();
         long fetchOffset = req.fetchOffset();
-        if (fetchOffset < 0 || fetchOffset > leo) {
+        // Below logStartOffset means the data was deleted by retention -> out of range.
+        if (fetchOffset < log.logStartOffset() || fetchOffset > leo) {
             return new FetchResponse(ErrorCode.OFFSET_OUT_OF_RANGE, leo, List.of());
         }
         if (fetchOffset == leo) { // caller is caught up: no new data yet, not an error
